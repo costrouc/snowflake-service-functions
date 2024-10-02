@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"log/slog"
 	"net/http"
@@ -35,8 +36,8 @@ func readHeaders(r *http.Request) *SnowflakeFunctionHeader {
 	}
 }
 
-type SnowflakeFunctionResponseHeader struct {
-	ContentMD5 string `json:"Content-MD5"`
+type SnowflakeFunctionResponse struct {
+	Data [][]interface{} `json:"data"`
 }
 
 func handleSnowflakeFunctionGET(w http.ResponseWriter, r *http.Request) {
@@ -44,13 +45,16 @@ func handleSnowflakeFunctionGET(w http.ResponseWriter, r *http.Request) {
 
 	headers := readHeaders(r)
 
-	switch headers.SfExternalFunctionName {
-	case "MYFUNCTION":
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{\"data\": [[0, \"myfunction\"]]}"))
-		return
-	default:
-		slog.Info("Error processing request unknown function name", "functionName", headers.SfExternalFunctionName)
+	response := SnowflakeFunctionResponse{
+		Data: [][]interface{}{{
+			0,
+			headers,
+		}},
+	}
+
+	err := json.NewEncoder(w).Encode(response)
+	if err != nil {
+		slog.Info("Error processing request", "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("500 Internal Service Error"))
 		return
@@ -66,13 +70,16 @@ func handleSnowflakeFunctionPOST(w http.ResponseWriter, r *http.Request) {
 
 	headers := readHeaders(r)
 
-	switch headers.SfExternalFunctionName {
-	case "MYFUNCTION":
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{\"data\": [[0, \"myfunction\"]]}"))
-		return
-	default:
-		slog.Info("Error processing request unknown function name", "functionName", headers.SfExternalFunctionName)
+	response := SnowflakeFunctionResponse{
+		Data: [][]interface{}{{
+			0, 
+			headers,
+		}},
+	}
+
+	err := json.NewEncoder(w).Encode(response)
+	if err != nil {
+		slog.Info("Error processing request", "err", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("500 Internal Service Error"))
 		return
