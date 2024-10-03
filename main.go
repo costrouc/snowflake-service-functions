@@ -1,98 +1,55 @@
 package main
 
 import (
-	"encoding/json"
+	"fmt"
 	"flag"
 	"log/slog"
 	"net/http"
+	"os/exec"
 )
 
-// https://docs.snowflake.com/en/sql-reference/external-functions-data-format#header-format
-type SnowflakeFunctionHeader struct {
-	SfExternalFunctionFormat           string //always "json"
-	SfExternalFunctionFormatVersion    string // always "1.0"
-	SfExternalFunctionCurrentQueryId   string
-	SfExternalFunctionQueryBatchId     string
-	SfExternalFunctionName             string
-	SfExternalFunctionNameBase64       string
-	SfExternalFunctionSignature        string
-	SfExternalFunctionSignatureBase64  string
-	SfExternalFunctionReturnType       string
-	SfExternalFunctionReturnTypeBase64 string
+type EchoServiceFunction struct {
+	headers *SnowflakeFunctionHeader
 }
 
-func readHeaders(r *http.Request) *SnowflakeFunctionHeader {
-	return &SnowflakeFunctionHeader{
-		SfExternalFunctionFormat:           r.Header.Get("sf-external-function-format"),
-		SfExternalFunctionFormatVersion:    r.Header.Get("sf-external-function-format-version"),
-		SfExternalFunctionCurrentQueryId:   r.Header.Get("sf-external-function-current-query-id"),
-		SfExternalFunctionQueryBatchId:     r.Header.Get("sf-external-function-query-batch-id"),
-		SfExternalFunctionName:             r.Header.Get("sf-external-function-name"),
-		SfExternalFunctionNameBase64:       r.Header.Get("sf-external-function-name-base64"),
-		SfExternalFunctionSignature:        r.Header.Get("sf-external-function-signature"),
-		SfExternalFunctionSignatureBase64:  r.Header.Get("sf-external-function-signature-base64"),
-		SfExternalFunctionReturnType:       r.Header.Get("sf-external-function-return-type"),
-		SfExternalFunctionReturnTypeBase64: r.Header.Get("sf-external-function-return-type-base64"),
-	}
+func (s *EchoServiceFunction) Result() (interface{}, error) {
+	return s.headers, nil
 }
 
-type SnowflakeFunctionResponse struct {
-	Data [][]interface{} `json:"data"`
+type ShellServiceFunction struct {
+	command string
+	args []string
 }
 
-func handleSnowflakeFunctionGET(w http.ResponseWriter, r *http.Request) {
-	slog.Info("Request", "method", r.Method, "path", r.URL.Path)
-
-	headers := readHeaders(r)
-
-	response := SnowflakeFunctionResponse{
-		Data: [][]interface{}{{
-			0,
-			headers,
-		}},
-	}
-
-	err := json.NewEncoder(w).Encode(response)
+func (s *ShellServiceFunction) Result() (interface{}, error) {
+	out, err := exec.Command(s.command, s.args...).Output()
 	if err != nil {
-		slog.Info("Error processing request", "err", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("500 Internal Service Error"))
-		return
-	}
-}
-
-type FunctionMYFUNCTIONOptions struct {
-	Arg1 string
-}
-
-func handleSnowflakeFunctionPOST(w http.ResponseWriter, r *http.Request) {
-	slog.Info("Request", "method", r.Method, "path", r.URL.Path)
-
-	headers := readHeaders(r)
-
-	response := SnowflakeFunctionResponse{
-		Data: [][]interface{}{{
-			0, 
-			headers,
-		}},
+		return nil, fmt.Errorf("running shell command=%s args=%s, %w", s.command, s.args, err)
 	}
 
-	err := json.NewEncoder(w).Encode(response)
-	if err != nil {
-		slog.Info("Error processing request", "err", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("500 Internal Service Error"))
-		return
-	}
+	return string(out), nil
 }
 
 func main() {
 	addr := flag.String("addr", "0.0.0.0:8080", "address for server to run")
 	flag.Parse()
 
+	serviceMux := NewSnowflakeServiceMux()
+	serviceMux.ServiceFunc("DEBUG", "(TEXT VARCHAR)", func(headers *SnowflakeFunctionHeader, args []interface{}) Task {
+		return &EchoServiceFunction{
+			headers: headers,
+		}
+	})
+
+	serviceMux.ServiceFunc("SHELL", "(CMD VARCHAR)", func(headers *SnowflakeFunctionHeader, args []interface{}) Task {
+		return &ShellServiceFunction{
+			command: "date",
+			args: []string{},
+		}
+	})
+
 	handler := http.NewServeMux()
-	handler.HandleFunc("GET /rpc", handleSnowflakeFunctionGET)
-	handler.HandleFunc("POST /rpc", handleSnowflakeFunctionPOST)
+	handler.Handle("/rpc", serviceMux)
 	handler.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte("404 page not found"))

@@ -5,7 +5,7 @@ WORKDIR /app
 COPY go.* ./
 RUN go mod download
 
-COPY main.go ./main.go
+COPY *.go ./
 
 RUN go build -v -o service-function-server
 
